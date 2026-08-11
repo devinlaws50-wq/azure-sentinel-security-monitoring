@@ -1,4 +1,5 @@
 # Week 14: Azure Sentinel Landing Zone
+[![Terraform Validate](https://github.com/devinlaws50-wq/azure-sentinel-security-monitoring/actions/workflows/terraform-validate.yml/badge.svg)](https://github.com/devinlaws50-wq/azure-sentinel-security-monitoring/actions/workflows/terraform-validate.yml)
 
 ![Azure](https://img.shields.io/badge/Azure-Cloud-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)
 ![Microsoft Sentinel](https://img.shields.io/badge/Microsoft%20Sentinel-SIEM%20%26%20SOAR-5E5ADB?style=for-the-badge&logo=microsoft&logoColor=white)
