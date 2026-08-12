@@ -1,74 +1,226 @@
-# Week 14: Azure Sentinel Landing Zone
+# Microsoft Sentinel Linux Security Monitoring
+
 [![Terraform Validate](https://github.com/devinlaws50-wq/azure-sentinel-security-monitoring/actions/workflows/terraform-validate.yml/badge.svg)](https://github.com/devinlaws50-wq/azure-sentinel-security-monitoring/actions/workflows/terraform-validate.yml)
 
-![Azure](https://img.shields.io/badge/Azure-Cloud-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)
-![Microsoft Sentinel](https://img.shields.io/badge/Microsoft%20Sentinel-SIEM%20%26%20SOAR-5E5ADB?style=for-the-badge&logo=microsoft&logoColor=white)
-![Terraform](https://img.shields.io/badge/Terraform-IaC-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)
-![KQL](https://img.shields.io/badge/KQL-Log%20Analytics-2563EB?style=for-the-badge)
-![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)
+![Azure](https://img.shields.io/badge/Azure-Cloud-0078D4?style=for-the-badge\&logo=microsoftazure\&logoColor=white)
+![Microsoft Sentinel](https://img.shields.io/badge/Microsoft%20Sentinel-SIEM%20%26%20SOAR-5E5ADB?style=for-the-badge\&logo=microsoft\&logoColor=white)
+![Terraform](https://img.shields.io/badge/Terraform-IaC-7B42BC?style=for-the-badge\&logo=terraform\&logoColor=white)
+![KQL](https://img.shields.io/badge/KQL-Detection%20Engineering-2563EB?style=for-the-badge)
+![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-E95420?style=for-the-badge\&logo=ubuntu\&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Completed-16A34A?style=for-the-badge)
 
-## 📌 Objective
+## Project Overview
 
-This lab focused on building an Azure Sentinel landing zone on top of an existing Log Analytics workspace, onboarding Linux Syslog authentication data, generating failed and successful SSH activity, and creating a scheduled analytics rule to detect a successful SSH login after multiple failures.
+This project implements a Microsoft Sentinel security-monitoring workflow for Linux SSH authentication activity in Azure.
 
-## 🎯 Outcomes
+An Ubuntu workload VM generates authentication telemetry that is collected through the Azure Monitor Agent and ingested into a Log Analytics workspace. Microsoft Sentinel uses that data for KQL-based hunting and scheduled detection.
 
-- Enabled Microsoft Sentinel using an existing Log Analytics workspace.
-- Validated Linux Syslog ingestion for `auth` and `authpriv` events through the Azure Monitor Agent data path.
-- Generated controlled SSH failures and a successful login against `vm-app-devin` to produce realistic authentication telemetry.
-- Queried Sentinel with KQL to identify failed SSH attempts by source IP and successful access after repeated failures.
-- Created a scheduled analytics rule in the Defender portal to alert on that pattern.
+The primary detection use case identifies a **successful SSH login after multiple failed authentication attempts from the same source IP and user**.
 
-## 🛠️ Tools & Technologies
+The project demonstrates the full monitoring lifecycle:
 
-- Microsoft Azure
-- Microsoft Sentinel
-- Log Analytics Workspace
-- Azure Monitor Agent (AMA)
-- Ubuntu Linux VM
-- Terraform
-- Kusto Query Language (KQL)
-- Microsoft Defender portal
-- SSH
+* Infrastructure deployment with Terraform
+* Linux authentication telemetry generation
+* Syslog ingestion through Azure Monitor Agent
+* Log Analytics validation
+* KQL hunting and event correlation
+* Scheduled Microsoft Sentinel analytics
+* Detection testing with controlled authentication activity
+* Automated Terraform validation with GitHub Actions
 
-## 🧱 Environment
+---
 
-This lab used an existing Azure landing zone and Log Analytics workspace, then layered Sentinel detection capabilities on top for centralized monitoring and analytics. SSH authentication events from the Ubuntu VM were ingested into the `Syslog` table, where they were later used for both hunting queries and scheduled detection logic.
+## Security Problem
 
-## 🗺️ Architecture
+Repeated failed authentication attempts followed by a successful login can indicate:
 
-The detection flow moved from SSH activity on the Linux VM to Syslog ingestion through AMA, then into Log Analytics and Microsoft Sentinel for KQL analysis and alerting.
+* Password guessing
+* Credential stuffing
+* Brute-force activity
+* Compromised credentials
+* Unauthorized access after repeated failures
+
+Looking only at failed authentication events can generate noise. Looking only at successful logins can miss the context that made the login suspicious.
+
+This project addresses that problem by correlating both event types.
+
+The detection asks:
+
+> Did the same source IP and user generate multiple failed SSH authentication attempts and then successfully authenticate within a short time window?
+
+This creates a more meaningful security signal than monitoring either event independently.
+
+---
+
+## Detection Objective
+
+The final detection logic identifies:
+
+```text
+3 or more failed SSH logins
+        ↓
+Same source IP
+        ↓
+Same username
+        ↓
+Successful authentication
+        ↓
+Within 15 minutes of the last failure
+        ↓
+Microsoft Sentinel detection
+```
+
+---
+
+## Architecture
+
+The monitoring flow begins with authentication activity against the Azure Linux VM.
 
 ```mermaid
 flowchart LR
-    A[Developer Workstation<br/>macOS / VS Code / SSH Client] -->|SSH attempts<br/>failed + successful| B[Azure Linux VM<br/>vm-app-devin<br/>Ubuntu 22.04]
-    B --> C[Linux auth logs<br/>auth / authpriv<br/>sshd + PAM]
-    C --> D[Azure Monitor Agent<br/>Syslog via AMA]
-    D --> E[Log Analytics Workspace<br/>log-landing-devin]
-    E --> F[Microsoft Sentinel]
-    F --> G[KQL Hunting Queries<br/>Syslog table]
-    G --> H[Scheduled Analytics Rule<br/>Success after multiple failures]
-    H --> I[Microsoft Defender Portal<br/>Analytics]
+    A["Administrator Workstation"] -->|SSH attempts| B["Azure Linux VM<br/>vm-app-devin"]
 
-    J[Source IP<br/>203.0.113.45] -->|Observed in Syslog| B
+    B --> C["Linux Authentication Logs<br/>auth / authpriv"]
+    C --> D["Azure Monitor Agent"]
+    D --> E["Log Analytics Workspace<br/>log-landing-devin"]
+    E --> F["Microsoft Sentinel"]
+    F --> G["KQL Hunting & Correlation"]
+    G --> H["Scheduled Analytics Rule"]
+    H --> I["Microsoft Defender Portal"]
 ```
 
-## ⚙️ Implementation Walkthrough
+### Data Flow
 
-### 1. Enabled Sentinel Workspace
+```text
+SSH authentication
+      ↓
+Linux sshd / PAM
+      ↓
+Syslog auth + authpriv
+      ↓
+Azure Monitor Agent
+      ↓
+Log Analytics Syslog table
+      ↓
+Microsoft Sentinel
+      ↓
+KQL correlation
+      ↓
+Scheduled analytics rule
+```
 
-Microsoft Sentinel was enabled against the existing Log Analytics workspace so the environment could ingest, query, and alert on security telemetry.
+---
 
-### 2. Verified Syslog Collection
+## Technologies Used
 
-Syslog ingestion was validated for Linux authentication facilities, which is the expected path for SSH authentication records collected through AMA.
+| Technology                | Purpose                                            |
+| ------------------------- | -------------------------------------------------- |
+| Microsoft Azure           | Cloud infrastructure platform                      |
+| Microsoft Sentinel        | SIEM and detection platform                        |
+| Log Analytics             | Centralized log storage and querying               |
+| Azure Monitor Agent       | Linux Syslog collection                            |
+| Ubuntu Linux              | Monitored workload                                 |
+| Syslog                    | Authentication telemetry source                    |
+| KQL                       | Hunting, aggregation, and correlation              |
+| Microsoft Defender Portal | Sentinel analytics-rule management                 |
+| SSH                       | Authentication activity used for detection testing |
+| Terraform                 | Infrastructure as Code                             |
+| Git                       | Source control                                     |
+| GitHub Actions            | Automated Terraform validation                     |
 
-### 3. Generated SSH Activity
+---
 
-Multiple failed password attempts were created first, followed by a successful SSH login to `vm-app-devin`, producing the exact sequence needed for detection testing.
+## Security Controls and Monitoring
 
-Example successful connection used during validation:
+### Centralized Log Collection
+
+Linux authentication activity is collected centrally rather than analyzed only on the VM.
+
+Relevant facilities include:
+
+```text
+auth
+authpriv
+```
+
+### Authentication Monitoring
+
+The project analyzes:
+
+```text
+Failed password
+Accepted password
+Accepted publickey
+```
+
+events generated by SSH.
+
+### Detection Correlation
+
+Failed and successful authentication records are correlated by:
+
+```text
+Source IP
+Username
+Time
+```
+
+to identify suspicious login sequences.
+
+### Scheduled Detection
+
+The final KQL correlation logic is implemented as a scheduled Microsoft Sentinel analytics rule.
+
+### Infrastructure Validation
+
+GitHub Actions automatically runs:
+
+```text
+terraform fmt -check -recursive
+terraform init -backend=false
+terraform validate
+```
+
+on pushes to `main` and pull requests.
+
+The CI workflow validates Terraform without deploying Azure resources or requiring Azure credentials.
+
+---
+
+## Implementation
+
+### 1. Enabled Microsoft Sentinel
+
+Microsoft Sentinel was enabled against the existing Log Analytics workspace:
+
+```text
+log-landing-devin
+```
+
+This allowed the workspace to be used for security hunting and scheduled analytics.
+
+![Sentinel workspace enabled](screenshots/01-enable-sentinel-workspace.png)
+
+### 2. Verified Linux Syslog Collection
+
+Linux authentication data was collected through the Azure Monitor Agent.
+
+The project focused on the facilities:
+
+```text
+auth
+authpriv
+```
+
+which contain SSH and PAM authentication activity.
+
+### 3. Generated Controlled Authentication Activity
+
+Multiple failed SSH authentication attempts were intentionally generated, followed by a successful authentication.
+
+This created the telemetry required to test the detection logic end-to-end.
+
+Example connection:
 
 ```bash
 ssh -i ~/.ssh/id_ed25519 labadmin@<redacted-public-ip>
@@ -76,9 +228,13 @@ hostname
 exit
 ```
 
-### 4. Queried Raw Authentication Events
+![Successful SSH authentication](screenshots/02-ssh-success.png)
 
-The `Syslog` table was queried for `auth` and `authpriv` records to confirm that both `Failed password` and `Accepted password` events were present for the VM.
+---
+
+## Log Validation
+
+Before writing detection logic, raw telemetry was validated in the `Syslog` table.
 
 ```kusto
 Syslog
@@ -89,9 +245,15 @@ Syslog
 | order by TimeGenerated desc
 ```
 
-### 5. Queried Failed SSH Attempts by Source IP
+This confirmed that both failed and successful SSH authentication records were available for analysis.
 
-KQL was used to summarize failed SSH attempts by source IP so the repeated authentication failures could be quickly identified.
+![Raw SSH Syslog events](screenshots/03-syslog-ssh-events.png)
+
+---
+
+## Failed SSH Detection
+
+The first hunting query summarizes failed SSH authentication attempts by source IP and user.
 
 ```kusto
 Syslog
@@ -104,9 +266,25 @@ Syslog
 | order by FailedCount desc
 ```
 
-### 6. Correlated Success After Multiple Failures
+### What the Query Does
 
-A second KQL query was used to correlate a later successful login from the same IP and user after three or more failed attempts within a short time window.
+The query:
+
+1. Limits analysis to recent events
+2. Filters to the monitored VM
+3. Selects authentication facilities
+4. Finds failed-password events
+5. Extracts the username and source IP
+6. Counts failures by user and source
+7. Sorts the most active sources first
+
+![Failed SSH attempts by source IP](screenshots/04-failed-ssh-by-ip.png)
+
+---
+
+## Success After Multiple Failures Detection
+
+The final detection correlates failed authentication activity with a later successful login.
 
 ```kusto
 let FailedLogons =
@@ -116,84 +294,304 @@ let FailedLogons =
     | where Facility in ("auth", "authpriv")
     | where SyslogMessage has "Failed password"
     | parse SyslogMessage with * "Failed password for " user " from " srcIp " port " srcPort " " authMethod
-    | summarize FailedCount = count(), FirstFailed = min(TimeGenerated), LastFailed = max(TimeGenerated) by srcIp, user;
+    | summarize
+        FailedCount = count(),
+        FirstFailed = min(TimeGenerated),
+        LastFailed = max(TimeGenerated)
+        by srcIp, user;
+
 let SuccessfulLogons =
     Syslog
     | where TimeGenerated >= ago(1h)
     | where Computer == "vm-app-devin"
     | where Facility in ("auth", "authpriv")
-    | where SyslogMessage has "Accepted password" or SyslogMessage has "Accepted publickey"
+    | where SyslogMessage has "Accepted password"
+        or SyslogMessage has "Accepted publickey"
     | parse SyslogMessage with * "Accepted " authMethod " for " user " from " srcIp " port " srcPort " " *
-    | project SuccessTime = TimeGenerated, srcIp, user, authMethod;
+    | project
+        SuccessTime = TimeGenerated,
+        srcIp,
+        user,
+        authMethod;
+
 FailedLogons
 | join kind=inner SuccessfulLogons on srcIp, user
-| where SuccessTime >= LastFailed and SuccessTime <= LastFailed + 15m
+| where SuccessTime >= LastFailed
+| where SuccessTime <= LastFailed + 15m
 | where FailedCount >= 3
-| project srcIp, user, FailedCount, FirstFailed, LastFailed, SuccessTime, authMethod
+| project
+    srcIp,
+    user,
+    FailedCount,
+    FirstFailed,
+    LastFailed,
+    SuccessTime,
+    authMethod
 | order by SuccessTime desc
 ```
 
-### 7. Created the Scheduled Analytics Rule
+### Detection Logic
 
-The final detection was built as a scheduled analytics rule in the Microsoft Defender portal, which is now the management path for Sentinel analytics in many tenants. The rule logic alerts when a successful SSH login occurs after three or more failed attempts from the same source IP.
+The rule identifies cases where:
 
-## 📸 Screenshots
+```text
+FailedCount >= 3
+```
 
-> Save all screenshots in: `week-14-azure-sentinel-landing-zone/screenshots/`
+and the successful authentication occurs:
 
-### 1. Sentinel workspace enabled
+```text
+after the last failed attempt
+```
 
-![Sentinel workspace enabled](screenshots/week-14-azure-sentinel-landing-zone-screenshots-01-enable-sentinel-workspace.png)
+but no later than:
 
-### 2. Successful SSH login to vm-app-devin
+```text
+15 minutes after the last failure
+```
 
-![Successful SSH login](screenshots/week-14-azure-sentinel-landing-zone-screenshots-02-ssh-success.png)
+for the same:
 
-### 3. Raw Syslog SSH events in Sentinel Logs
+```text
+srcIp + user
+```
 
-![Raw Syslog SSH events](screenshots/week-14-azure-sentinel-landing-zone-screenshots-03-syslog-ssh-events.png)
+This turns individual authentication records into a correlated security event.
 
-### 4. Failed SSH by source IP query results
+---
 
-![Failed SSH by source IP](screenshots/week-14-azure-sentinel-landing-zone-screenshots-04-failed-ssh-by-ip.png)
+## Scheduled Analytics Rule
 
-### 5. Scheduled analytics rule enabled in Defender portal
+The final KQL detection was configured as a scheduled analytics rule in Microsoft Sentinel through the Microsoft Defender portal.
 
-![Scheduled analytics rule](screenshots/week-14-azure-sentinel-landing-zone-screenshots-05-analytic-rule-ssh-success-after-failures.png)
+The detection monitors for:
 
-## 🧠 What I Learned
+> A successful SSH authentication after three or more failed authentication attempts from the same source IP and user.
 
-This lab tied together infrastructure, telemetry, and detection engineering in a practical way by showing how Linux auth logs can flow from a VM into Sentinel for analysis and alerting. It also reinforced the value of validating detections with controlled test activity instead of assuming a rule works just because it saves successfully.
+![Scheduled Sentinel analytics rule](screenshots/05-analytic-rule-ssh-success-after-failures.png)
 
-## 🚧 Challenges & Troubleshooting
+---
 
-- Sentinel analytics management redirected from the Azure portal to the Defender portal, so the scheduled rule had to be completed there instead of the older Azure-only workflow.
-- The scheduled rule wizard initially failed validation until the KQL query was cleaned up and the scheduling fields were fully populated.
-- SSH testing initially failed because the placeholder identity file path was incorrect, but the correct `id_ed25519` key successfully authenticated to the VM after the path was fixed.
+## Validation
 
-## ✅ Validation
+The project was considered successfully validated when all of the following were confirmed:
 
-The lab was considered complete after Syslog showed both failed and successful SSH events, the correlation query returned the expected row for the source IP and user, and the scheduled analytics rule validated successfully in the Defender portal.
+* Linux authentication events appeared in the `Syslog` table
+* `auth` and `authpriv` telemetry was present
+* Failed SSH authentication events were visible
+* Successful authentication events were visible
+* Failed attempts could be grouped by source IP
+* The correlation query returned the expected source/user combination
+* The successful login occurred after the failed attempts
+* The scheduled analytics rule validated successfully
+* Terraform configuration passed GitHub Actions CI
 
+This test-driven process verified the entire path from endpoint activity to SIEM detection.
 
-## ✅ What This Proves
+---
 
-- Enabled Microsoft Sentinel on an existing Log Analytics workspace and validated Syslog ingestion via Azure Monitor Agent — demonstrating SIEM onboarding and data connector configuration
-- Wrote KQL queries to detect SSH brute force patterns and correlate failed login attempts with successful authentication — a real detection engineering workflow
-- Created a scheduled analytics rule in Microsoft Defender portal that alerts on "success after multiple failures" — directly mirrors production SOC detection tuning
-- Generated controlled SSH authentication telemetry to validate detection logic end-to-end — demonstrates test-driven security validation
-- Provisioned the underlying infrastructure with Terraform, tying IaC skills directly to a security use case
+## Challenges and Troubleshooting
 
-## 🔐 Security Relevance
+### Defender Portal Transition
 
-This lab maps directly to Security Operations Center (SOC) Analyst and Detection Engineer responsibilities: configuring SIEM data ingestion, writing detection logic in KQL, and validating that analytics rules fire on real-world attack patterns. The SSH brute force → success correlation is a standard detection use case in any enterprise security operations playbook.
+Sentinel analytics management redirected from the Azure portal into the Microsoft Defender portal.
 
-## 📚 Lessons Learned / Next Improvements
+The scheduled rule workflow therefore had to be completed through Defender rather than relying on the older Azure-only management experience.
 
-- Add Microsoft Sentinel Watchlists for known-bad IPs to enrich alerts with threat intelligence context
-- Expand detection coverage to include sudo privilege escalation events from the same Syslog source
-- Build a Sentinel workbook to visualize authentication trends and anomaly patterns over time
+### Analytics Rule Validation
 
-## 🧹 Cleanup
+The scheduled-rule wizard initially failed validation.
 
-After validation and screenshots were complete, the Ubuntu VM could be stopped and deallocated to avoid unnecessary Azure compute charges while preserving the Sentinel configuration and documentation for the lab.
+The issue was resolved by cleaning up the KQL query and ensuring all scheduling fields were populated correctly.
+
+### SSH Key Path
+
+Initial SSH testing used an incorrect identity-file path.
+
+The correct key:
+
+```text
+~/.ssh/id_ed25519
+```
+
+was then used successfully.
+
+### Detection Testing
+
+Creating a saved rule alone does not prove that the detection works.
+
+Controlled failed and successful authentication events were generated so the KQL logic could be validated against actual telemetry.
+
+---
+
+## Security Considerations
+
+This project demonstrates several security-monitoring principles:
+
+* Authentication activity is collected centrally.
+* Failed and successful logins are analyzed together.
+* Detection logic uses multiple contextual fields rather than a single event.
+* KQL is tested against controlled activity before being operationalized.
+* Infrastructure is defined through Terraform.
+* Terraform state and local variable files are excluded from source control.
+* CI validation does not require Azure credentials.
+* Public addresses shown in documentation are redacted or represented with placeholders.
+
+For a production environment, additional considerations would include:
+
+* Alert severity and incident grouping
+* Entity mapping
+* Service-account exclusions
+* Known administrative-source exclusions
+* Dynamic thresholds
+* Watchlists
+* Threat-intelligence enrichment
+* GeoIP enrichment
+* UEBA
+* False-positive tuning
+* Automated incident response
+* Longer retention requirements
+* Cross-host authentication correlation
+
+---
+
+## Cost Considerations
+
+Microsoft Sentinel and Log Analytics can generate costs based on data ingestion, retention, and enabled services.
+
+Azure VM compute also incurs charges while the monitored workload is running.
+
+For lab environments:
+
+* Stop or deallocate VMs when testing is complete.
+* Monitor Log Analytics ingestion volume.
+* Review Sentinel and workspace retention settings.
+* Remove unused Azure resources.
+* Use Azure Cost Management to monitor spending.
+
+---
+
+## Cleanup
+
+After validation:
+
+1. Stop or deallocate the Ubuntu VM if the environment will be reused.
+2. Destroy Terraform-managed resources when they are no longer needed.
+3. Review Log Analytics and Sentinel resources that may continue generating charges.
+
+For Terraform-managed infrastructure:
+
+```bash
+terraform destroy
+```
+
+Review the destruction plan before confirming.
+
+Because Terraform state is intentionally excluded from Git, destruction must be performed from the environment containing the matching Terraform state.
+
+---
+
+## Key Outcomes
+
+This project demonstrated the ability to:
+
+* Enable Microsoft Sentinel on an existing Log Analytics workspace
+* Onboard Linux authentication telemetry
+* Validate Syslog ingestion through Azure Monitor Agent
+* Generate controlled security events
+* Hunt authentication activity with KQL
+* Parse usernames and source IP addresses from Syslog
+* Aggregate failed login attempts
+* Correlate failed and successful authentication activity
+* Build a scheduled Sentinel analytics rule
+* Validate detection logic end-to-end
+* Troubleshoot SIEM configuration issues
+* Connect Infrastructure as Code to a security-monitoring use case
+* Implement automated Terraform validation through GitHub Actions
+
+---
+
+## Skills Demonstrated
+
+```text
+Microsoft Sentinel
+SIEM
+Detection Engineering
+Kusto Query Language
+KQL
+Log Analytics
+Azure Monitor Agent
+Linux
+Ubuntu
+Syslog
+SSH
+Authentication Monitoring
+Threat Detection
+Security Monitoring
+Incident Detection
+Log Parsing
+Event Correlation
+Microsoft Defender Portal
+Terraform
+Infrastructure as Code
+Azure
+Git
+GitHub
+GitHub Actions
+CI/CD
+Security Validation
+```
+
+---
+
+## Repository Structure
+
+```text
+.
+├── .github/
+│   └── workflows/
+│       └── terraform-validate.yml
+├── screenshots/
+│   ├── 01-enable-sentinel-workspace.png
+│   ├── 02-ssh-success.png
+│   ├── 03-syslog-ssh-events.png
+│   ├── 04-failed-ssh-by-ip.png
+│   └── 05-analytic-rule-ssh-success-after-failures.png
+├── .gitignore
+├── .terraform.lock.hcl
+├── main.tf
+├── outputs.tf
+├── README.md
+├── screenshot-list.txt
+├── terraform.tfvars.example
+└── variables.tf
+```
+
+---
+
+## Future Improvements
+
+Future iterations could extend the detection environment with:
+
+* Microsoft Sentinel Watchlists
+* Known-bad IP enrichment
+* Threat-intelligence correlation
+* Sudo privilege-escalation detections
+* Impossible-travel or unusual-location analysis
+* Additional Linux persistence detections
+* Sentinel Workbooks
+* Authentication trend dashboards
+* Alert entity mapping
+* Incident grouping
+* Automated response playbooks
+* MITRE ATT&CK mapping
+* Detection-as-code workflows
+
+---
+
+## Author
+
+**Devin Laws**
+Systems Administrator | Cloud Infrastructure & Security
+
+[LinkedIn](https://linkedin.com/in/dlaws2030) | [GitHub](https://github.com/devinlaws50-wq)
